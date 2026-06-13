@@ -3,6 +3,10 @@ name: Build Loro for iOS
 on:
   workflow_dispatch:
 
+env:
+  # This silences the annoying Node.js warning
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   build:
     runs-on: macos-latest
@@ -11,6 +15,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: loro-dev/loro-py
+          ref: v1.10.3  # <-- The crucial fix: locking to the stable release
           submodules: true
 
       - name: Set up Python
