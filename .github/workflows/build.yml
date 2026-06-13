@@ -4,8 +4,12 @@ on:
   workflow_dispatch:
 
 env:
-  # Silences the Node.js warning
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # --- THE FIX ---
+  # These variables force the Rust compiler to bypass the missing iOS Python files
+  PYO3_CROSS_PYTHON_VERSION: "3.13"
+  PYO3_CROSS_LIB_DIR: "/tmp" 
+  RUSTFLAGS: "-C link-arg=-undefined -C link-arg=dynamic_lookup"
 
 jobs:
   build:
@@ -24,15 +28,14 @@ jobs:
       - name: Install maturin
         run: pip install maturin
 
-      - name: Download, Extract, and Compile Loro
+      - name: Download and Extract
         run: |
-          # 1. Download the source directly from Python's official registry
+          # Grabbing the code directly from Python's official registry to bypass the Git error
           pip download loro==1.10.3 --no-binary :all:
-          
-          # 2. Unzip the source code tarball
           tar -xzf loro-1.10.3.tar.gz
-          
-          # 3. Enter the folder and attempt the cross-compile
+
+      - name: Compile with Custom iOS Flags
+        run: |
           cd loro-1.10.3
           maturin build --release --target aarch64-apple-ios --out ../dist
 
