@@ -4,20 +4,13 @@ on:
   workflow_dispatch:
 
 env:
-  # This silences the annoying Node.js warning
+  # Silences the Node.js warning
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
     runs-on: macos-latest
     steps:
-      - name: Checkout loro-py
-        uses: actions/checkout@v4
-        with:
-          repository: loro-dev/loro-py
-          ref: v1.10.3  # <-- The crucial fix: locking to the stable release
-          submodules: true
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -31,8 +24,17 @@ jobs:
       - name: Install maturin
         run: pip install maturin
 
-      - name: Build wheel
-        run: maturin build --release --target aarch64-apple-ios --out dist
+      - name: Download, Extract, and Compile Loro
+        run: |
+          # 1. Download the source directly from Python's official registry
+          pip download loro==1.10.3 --no-binary :all:
+          
+          # 2. Unzip the source code tarball
+          tar -xzf loro-1.10.3.tar.gz
+          
+          # 3. Enter the folder and attempt the cross-compile
+          cd loro-1.10.3
+          maturin build --release --target aarch64-apple-ios --out ../dist
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
