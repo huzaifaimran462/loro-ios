@@ -1,0 +1,44 @@
+name: Build Msgspec for iOS
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Compile msgspec for iOS
+        run: |
+          # Grab the physical iOS SDK paths from the cloud Mac
+          SDKROOT=$(xcrun --sdk iphoneos --show-sdk-path)
+          
+          # Force Apple's C-compiler to target the iPad instead of the Mac
+          export CC="clang"
+          export LDSHARED="clang -dynamiclib -undefined dynamic_lookup"
+          export CFLAGS="-arch arm64 -miphoneos-version-min=14.0 -isysroot $SDKROOT"
+          export LDFLAGS="-arch arm64 -miphoneos-version-min=14.0 -isysroot $SDKROOT -undefined dynamic_lookup"
+          export _PYTHON_HOST_PLATFORM="ios-14.0-arm64"
+          
+          # Install build tools
+          pip install setuptools wheel
+          
+          # Build the wheel directly from the source code
+          mkdir dist
+          pip wheel msgspec --no-deps --no-build-isolation --wheel-dir dist
+          
+          # Dynamically rename the wheel to a universal tag to bypass pip's strict naming rules
+          cd dist
+          for f in *.whl; do
+            mv "$f" "${f%-cp313*}-py3-none-any.whl"
+          done
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: msgspec-ios-wheel
+          path: dist/*.whl
