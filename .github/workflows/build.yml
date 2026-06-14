@@ -1,12 +1,14 @@
-name: Build Loro for iOS (Extreme Difficulty)
+name: Build Loro for iOS (after beeware attempt but rem now)
 
 on:
   workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Bypass PyO3 cross-compile validations
   PYO3_CROSS_PYTHON_VERSION: "3.13"
-  # We instruct the linker to ignore missing dynamic libraries and just build the wheel
+  PYO3_CROSS_LIB_DIR: "/tmp"
+  # Force the linker to ignore missing iOS Python C-libraries
   RUSTFLAGS: "-C link-arg=-undefined -C link-arg=dynamic_lookup"
 
 jobs:
@@ -26,25 +28,33 @@ jobs:
       - name: Install maturin
         run: pip install maturin
 
-      - name: Download & Extract BeeWare iOS Python Headers
+      - name: Create Python Interceptor
         run: |
-          echo "Downloading BeeWare Python-Apple-support for 3.13..."
-          # Fetch the pre-compiled iOS framework
-          curl -L -o beeware.tar.gz "https://github.com/beeware/Python-Apple-support/releases/download/3.13-b2/Python-3.13-iOS-support.b2.tar.gz"
-          mkdir ios-python
-          tar -xzf beeware.tar.gz -C ios-python
+          # 1. Create a python script that intercepts JSON responses
+          cat << 'EOF' > fake_python.py
+          import sys
+          import subprocess
+          result = subprocess.run([sys.executable] + sys.argv[1:], capture_output=True, text=True)
+          out = result.stdout
           
-          # Dynamically locate the arm64 physical C-headers and pipe them to GitHub's environment variables
-          HEADERS_PATH=$(find $(pwd)/ios-python -type d -name "Headers" | grep "ios-arm64" | head -n 1)
-          echo "Found Headers at: $HEADERS_PATH"
-          echo "PYO3_CROSS_INCLUDE_DIR=$HEADERS_PATH" >> $GITHUB_ENV
+          # The Man-in-the-Middle rewrite: Tell Maturin we are natively on iOS
+          out = out.replace('"system": "Darwin"', '"system": "Ios"')
+          out = out.replace('"system": "darwin"', '"system": "Ios"')
+          out = out.replace('"platform": "darwin"', '"platform": "ios"')
           
-          # Dynamically locate the arm64 library path
-          LIB_PATH=$(find $(pwd)/ios-python -type d -name "ios-arm64" | head -n 1)
-          echo "Found Libs at: $LIB_PATH"
-          echo "PYO3_CROSS_LIB_DIR=$LIB_PATH" >> $GITHUB_ENV
+          sys.stdout.write(out)
+          sys.stderr.write(result.stderr)
+          sys.exit(result.returncode)
+          EOF
+          
+          # 2. Create the executable bash wrapper
+          cat << EOF > fake_python
+          #!/bin/bash
+          python3 ${GITHUB_WORKSPACE}/fake_python.py "\$@"
+          EOF
+          chmod +x fake_python
 
-      - name: Download and Extract Loro Source
+      - name: Download and Extract
         run: |
           pip download loro==1.10.3 --no-binary :all:
           tar -xzf loro-1.10.3.tar.gz
@@ -52,8 +62,8 @@ jobs:
       - name: Compile Loro Wheel
         run: |
           cd loro-1.10.3
-          # The compiler will now see the PyO3 env variables pointing to the physical BeeWare iOS headers
-          maturin build --release --target aarch64-apple-ios --out ../dist
+          # We pass -i to forcefully inject our Fake Python into the compiler pipeline
+          maturin build --release --target aarch64-apple-ios --out ../dist -i ${GITHUB_WORKSPACE}/fake_python
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
