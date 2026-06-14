@@ -1,4 +1,4 @@
-name: Build Loro for iOS
+name: Build Loro for iOS hack
 
 on:
   workflow_dispatch:
@@ -26,8 +26,21 @@ jobs:
       - name: Install maturin
         run: pip install maturin
 
-      - name: Create Python Interceptor
+      - name: Create Python Interceptor & Mock Sysconfig
         run: |
+          # 1. Hack the sysconfig data: Dump macOS config, patch to iOS, save to /tmp
+          cat << 'EOF' > make_sysconfig.py
+          import sysconfig, pprint
+          vars = sysconfig.get_config_vars()
+          for k, v in vars.items():
+              if isinstance(v, str):
+                  vars[k] = v.replace('-mmacosx-version-min', '-mios-version-min')
+          with open('/tmp/_sysconfigdata_ios.py', 'w') as f:
+              f.write('build_time_vars = ' + pprint.pformat(vars))
+          EOF
+          python3 make_sysconfig.py
+
+          # 2. Fake Python Interceptor
           cat << 'EOF' > fake_python.py
           import sys
           import subprocess
@@ -36,16 +49,13 @@ jobs:
           result = subprocess.run([sys.executable] + sys.argv[1:], capture_output=True, text=True)
           out = result.stdout
           
-          # 1. Fix the OS mismatch (maturin expects strictly lowercase 'ios')
           out = out.replace('"system": "Darwin"', '"system": "ios"')
           out = out.replace('"system": "darwin"', '"system": "ios"')
           out = out.replace('"system": "Ios"', '"system": "ios"')
           
-          # 2. Fix the Architecture mismatch (macOS uses "arm64", but maturin expects "aarch64" for iOS)
           out = out.replace('"machine": "arm64"', '"machine": "aarch64"')
           out = out.replace('"machine": "x86_64"', '"machine": "aarch64"')
           
-          # 3. Clean up the platform tag to prevent any Darwin leakage
           out = re.sub(r'"platform":\s*"[^"]+"', '"platform": "ios-aarch64"', out)
           
           sys.stdout.write(out)
