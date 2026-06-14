@@ -1,14 +1,12 @@
-name: Build Loro for iOS (after beeware attempt but rem now)
+name: Build Loro for iOS
 
 on:
   workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # Bypass PyO3 cross-compile validations
   PYO3_CROSS_PYTHON_VERSION: "3.13"
   PYO3_CROSS_LIB_DIR: "/tmp"
-  # Force the linker to ignore missing iOS Python C-libraries
   RUSTFLAGS: "-C link-arg=-undefined -C link-arg=dynamic_lookup"
 
 jobs:
@@ -30,24 +28,31 @@ jobs:
 
       - name: Create Python Interceptor
         run: |
-          # 1. Create a python script that intercepts JSON responses
           cat << 'EOF' > fake_python.py
           import sys
           import subprocess
+          import re
+          
           result = subprocess.run([sys.executable] + sys.argv[1:], capture_output=True, text=True)
           out = result.stdout
           
-          # The Man-in-the-Middle rewrite: Tell Maturin we are natively on iOS
-          out = out.replace('"system": "Darwin"', '"system": "Ios"')
-          out = out.replace('"system": "darwin"', '"system": "Ios"')
-          out = out.replace('"platform": "darwin"', '"platform": "ios"')
+          # 1. Fix the OS mismatch (maturin expects strictly lowercase 'ios')
+          out = out.replace('"system": "Darwin"', '"system": "ios"')
+          out = out.replace('"system": "darwin"', '"system": "ios"')
+          out = out.replace('"system": "Ios"', '"system": "ios"')
+          
+          # 2. Fix the Architecture mismatch (macOS uses "arm64", but maturin expects "aarch64" for iOS)
+          out = out.replace('"machine": "arm64"', '"machine": "aarch64"')
+          out = out.replace('"machine": "x86_64"', '"machine": "aarch64"')
+          
+          # 3. Clean up the platform tag to prevent any Darwin leakage
+          out = re.sub(r'"platform":\s*"[^"]+"', '"platform": "ios-aarch64"', out)
           
           sys.stdout.write(out)
           sys.stderr.write(result.stderr)
           sys.exit(result.returncode)
           EOF
           
-          # 2. Create the executable bash wrapper
           cat << EOF > fake_python
           #!/bin/bash
           python3 ${GITHUB_WORKSPACE}/fake_python.py "\$@"
@@ -62,7 +67,6 @@ jobs:
       - name: Compile Loro Wheel
         run: |
           cd loro-1.10.3
-          # We pass -i to forcefully inject our Fake Python into the compiler pipeline
           maturin build --release --target aarch64-apple-ios --out ../dist -i ${GITHUB_WORKSPACE}/fake_python
 
       - name: Upload Artifact
