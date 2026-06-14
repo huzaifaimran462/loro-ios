@@ -1,14 +1,12 @@
-name: Build Loro for iOS
+name: Build Loro for iOS (Extreme Difficulty)
 
 on:
   workflow_dispatch:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  # --- THE FIX ---
-  # These variables force the Rust compiler to bypass the missing iOS Python files
   PYO3_CROSS_PYTHON_VERSION: "3.13"
-  PYO3_CROSS_LIB_DIR: "/tmp" 
+  # We instruct the linker to ignore missing dynamic libraries and just build the wheel
   RUSTFLAGS: "-C link-arg=-undefined -C link-arg=dynamic_lookup"
 
 jobs:
@@ -28,15 +26,33 @@ jobs:
       - name: Install maturin
         run: pip install maturin
 
-      - name: Download and Extract
+      - name: Download & Extract BeeWare iOS Python Headers
         run: |
-          # Grabbing the code directly from Python's official registry to bypass the Git error
+          echo "Downloading BeeWare Python-Apple-support for 3.13..."
+          # Fetch the pre-compiled iOS framework
+          curl -L -o beeware.tar.gz "https://github.com/beeware/Python-Apple-support/releases/download/3.13-b2/Python-3.13-iOS-support.b2.tar.gz"
+          mkdir ios-python
+          tar -xzf beeware.tar.gz -C ios-python
+          
+          # Dynamically locate the arm64 physical C-headers and pipe them to GitHub's environment variables
+          HEADERS_PATH=$(find $(pwd)/ios-python -type d -name "Headers" | grep "ios-arm64" | head -n 1)
+          echo "Found Headers at: $HEADERS_PATH"
+          echo "PYO3_CROSS_INCLUDE_DIR=$HEADERS_PATH" >> $GITHUB_ENV
+          
+          # Dynamically locate the arm64 library path
+          LIB_PATH=$(find $(pwd)/ios-python -type d -name "ios-arm64" | head -n 1)
+          echo "Found Libs at: $LIB_PATH"
+          echo "PYO3_CROSS_LIB_DIR=$LIB_PATH" >> $GITHUB_ENV
+
+      - name: Download and Extract Loro Source
+        run: |
           pip download loro==1.10.3 --no-binary :all:
           tar -xzf loro-1.10.3.tar.gz
 
-      - name: Compile with Custom iOS Flags
+      - name: Compile Loro Wheel
         run: |
           cd loro-1.10.3
+          # The compiler will now see the PyO3 env variables pointing to the physical BeeWare iOS headers
           maturin build --release --target aarch64-apple-ios --out ../dist
 
       - name: Upload Artifact
